@@ -1,0 +1,73 @@
+// This is Prisma schema file
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum CargoType {
+  QUICK
+  NORMAL
+}
+
+enum CargoStatus {
+  PRE_REGISTERED
+  RECEIVED_AT_ERENHOT
+  IN_TRANSIT
+  DELIVERED_TO_UB
+  DELIVERED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  PARTIALLY_PAID
+}
+
+enum UserType {
+  TEMPORARY
+  REGISTERED
+}
+
+model User {
+  id            String    @id @default(uuid())
+  name          String?
+  phoneNumber   String    @unique
+  email         String?   @unique
+  emailVerified Boolean   @default(false)
+  password      String?
+  userType      UserType  @default(TEMPORARY)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  cargos        CargoTracking[]
+}
+
+model CargoTracking {
+  id                      String        @id @default(uuid())
+  nickname                String?       // User-defined name to identify cargo
+  trackingNumber          String        @unique
+  cargoType               CargoType      @default(NORMAL)
+  price                   Decimal?       @db.Decimal(10, 2)
+  paymentStatus           PaymentStatus  @default(PENDING)
+  
+  preRegisteredDate       DateTime?     // When user added the tracking number
+  receivedAtErenhotDate   DateTime?     // When received at Ereen
+  inTransitDate           DateTime?     // When started transit
+  deliveredToUBDate       DateTime?     // When arrived at UB
+  deliveredDate           DateTime?     // When delivered to final customer
+
+  currentStatus           CargoStatus    @default(PRE_REGISTERED)
+
+  createdAt               DateTime       @default(now())
+  updatedAt               DateTime       @updatedAt
+
+  // Foreign keys
+  userId                  String?
+  user                    User?          @relation(fields: [userId], references: [id])
+
+  @@index([trackingNumber])
+  @@index([userId])
+}
