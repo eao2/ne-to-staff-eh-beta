@@ -3,7 +3,7 @@ const prisma = new PrismaClient()
 
 export default defineEventHandler(async (event) => {
   try {
-    const { barcode, cargoType } = await readBody(event)
+    const { barcode } = await readBody(event)
 
     if (!barcode) {
       throw new Error('Barcode is required')
@@ -14,29 +14,26 @@ export default defineEventHandler(async (event) => {
       where: { trackingNumber: barcode }
     })
 
-    // If cargo exists and already received at Erenhot, prevent duplicate registration
-    if (existingCargo && existingCargo.currentStatus === 'RECEIVED_AT_ERENHOT') {
-      throw createError({
-        statusCode: 409, // Conflict
-        message: 'Энэ карго бүртгэгдсэн байна'
-      })
-    }
+    if (existingCargo) {
+      // Update existing cargo's receive time if not already received
+      if (existingCargo.currentStatus === 'RECEIVED_AT_ERENHOT') {
+        throw createError({
+          statusCode: 409,
+          message: '包裹已经登记'
+        })
+      }
 
-    // If cargo exists with PRE_REGISTERED status, update it
-    if (existingCargo && existingCargo.currentStatus === 'PRE_REGISTERED') {
       const updatedCargo = await prisma.cargoTracking.update({
         where: { trackingNumber: barcode },
         data: {
           currentStatus: 'RECEIVED_AT_ERENHOT',
           receivedAtErenhotDate: new Date().toISOString(),
-          cargoType: cargoType || existingCargo.cargoType,
-          // Keep existing user relation
-          userId: existingCargo.userId
         }
       })
+
       return {
         success: true,
-        message: 'Pre-registered cargo updated to RECEIVED_AT_ERENHOT',
+        message: '包裹状态已更新',
         cargo: updatedCargo
       }
     }
@@ -46,21 +43,20 @@ export default defineEventHandler(async (event) => {
       data: {
         trackingNumber: barcode,
         currentStatus: 'RECEIVED_AT_ERENHOT',
-        receivedAtErenhotDate: new Date().toISOString(),
-        cargoType: cargoType || 'NORMAL'
+        receivedAtErenhotDate: new Date().toISOString()
       }
     })
 
     return {
       success: true,
-      message: 'New cargo received at Erenhot',
+      message: '新包裹已登记',
       cargo: newCargo
     }
   } catch (error) {
     console.error('Error receiving cargo:', error)
     throw createError({
       statusCode: error.statusCode || 500,
-      message: error.message || 'Failed to receive cargo'
+      message: error.message || '登记包裹失败'
     })
   }
-}) 
+})

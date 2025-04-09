@@ -4,15 +4,30 @@ import { ref, onMounted, onUnmounted } from "vue";
 const scannerContainer = ref(null);
 const scannedBarcode = ref(null);
 const manualBarcodeInput = ref("");
-const cargoType = ref("NORMAL");
 const scannerActive = ref(false);
 const errorMessage = ref("");
 const statusMessage = ref("Scanner initializing...");
 const recentlyScanned = ref([]);
 const debugInfo = ref("");
+const zoomLevel = ref(1);
 let videoStream = null;
 let barcodeDetector = null;
 let detectionInterval = null;
+
+const setZoom = async (level) => {
+  try {
+    if (!videoStream) return;
+    const videoTrack = videoStream.getVideoTracks()[0];
+    await videoTrack.applyConstraints({
+      advanced: [{
+        zoom: level
+      }]
+    });
+    zoomLevel.value = level;
+  } catch (error) {
+    console.error("Error setting zoom:", error);
+  }
+};
 
 const startScanner = async () => {
   try {
@@ -62,12 +77,12 @@ const startScanner = async () => {
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: 'environment',
-        width: { ideal: 1024 }, // Reduced from 4096
-        height: { ideal: 768 }, // 4:3 aspect ratio
+        width: { ideal: 2048 }, // Reduced from 4096
+        height: { ideal: 1536 }, // 4:3 aspect ratio
         aspectRatio: { ideal: 4/3 },
         frameRate: { ideal: 30, max: 30 },
         advanced: [{
-          zoom: 1.5, // Reduced zoom for better stability
+          zoom: zoomLevel.value, // Use dynamic zoom
           brightness: { ideal: 128 },
           contrast: { ideal: 128 },
           exposureMode: 'continuous',
@@ -105,7 +120,7 @@ const startScanner = async () => {
 
               // Store the detected barcode
               manualBarcodeInput.value = code;
-              statusMessage.value = `Detected ${format} barcode: ${code}. Press "Бүртгэх" to send.`;
+              statusMessage.value = `Detected ${format} barcode: ${code}. Press "登记" to send.`;
 
               // Visual feedback
               document.querySelector('.scanner-view').classList.add('detected');
@@ -161,18 +176,15 @@ const resetScanner = () => {
 const sendBarcodeToAPI = async (barcode) => {
   try {
     if (!barcode) {
-      errorMessage.value = "No barcode to send";
+      errorMessage.value = "请输入跟踪号码";
       return;
     }
     
-    statusMessage.value = `Sending barcode: ${barcode} to API...`;
+    statusMessage.value = `发送跟踪号码: ${barcode}...`;
     const response = await fetch("/api/cargo/receive", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ 
-        barcode,
-        cargoType: cargoType.value
-      }),
+      body: JSON.stringify({ barcode }),
     });
     
     if (response.status === 409) {
@@ -193,7 +205,6 @@ const sendBarcodeToAPI = async (barcode) => {
     // Add to recent scans list
     recentlyScanned.value.unshift({
       code: barcode,
-      format: cargoType.value,
       time: new Date().toLocaleTimeString()
     });
     
@@ -302,6 +313,23 @@ onUnmounted(() => {
     <TopNavigation />
     
     <div class="content">
+      <div class="zoom-controls">
+        <button 
+          @click="setZoom(1)" 
+          :class="{ active: zoomLevel === 1 }"
+          class="zoom-btn"
+        >1x</button>
+        <button 
+          @click="setZoom(1.5)" 
+          :class="{ active: zoomLevel === 1.5 }"
+          class="zoom-btn"
+        >1.5x</button>
+        <button 
+          @click="setZoom(2)" 
+          :class="{ active: zoomLevel === 2 }"
+          class="zoom-btn"
+        >2x</button>
+      </div>
 
       <div class="scanner-view" :class="{ 'active': scannerActive }">
         <div ref="scannerContainer" class="video-container">
@@ -319,67 +347,37 @@ onUnmounted(() => {
       </div>
       
       <div class="controls">
-        <!-- Manual barcode input with send button only -->      <div class="form-grid">
-        <div class="form-group">
-          <label>Карго Төрөл:</label>
-          <div class="cargo-type-options">
-            <input 
-              type="radio" 
-              id="normal" 
-              value="NORMAL" 
-              v-model="cargoType"
-              name="cargoType"
-            />
-            <label class="radio-box" for="normal">
-              <span class="radio-label">Энгийн</span>
-            </label>
-
-            <input 
-              type="radio" 
-              id="quick" 
-              value="QUICK" 
-              v-model="cargoType"
-              name="cargoType"
-            />
-            <label class="radio-box" for="quick">
-              <span class="radio-label">Шуурхай</span>
-            </label>
-          </div>
-        </div>
-      </div>
         <div class="manual-input">
           <input 
             type="text" 
             v-model="manualBarcodeInput" 
-            placeholder="Трак код оруулах" 
+            placeholder="请输入跟踪号码" 
             @keyup.enter="sendManualBarcode"
           />
-          <button @click="sendManualBarcode" class="btn-submit">Бүртгэх</button>
+          <button @click="sendManualBarcode" class="btn-submit">登记</button>
         </div>
         
         <!-- Recent scans list -->
         <div v-if="recentlyScanned.length > 0" class="recent-list">
-          <h3>Сүүлд Бүртгэсэн:</h3>
+          <h3>最近扫描:</h3>
           <table class="cargos-table">
             <thead>
               <tr>
-                <th>Трак Код</th>
-                <th>Төрөл</th>
-                <th>Цаг</th>
-                <th>Үйлдэл</th>
+                <th>跟踪号码</th>
+                <th>时间</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="(item, index) in recentlyScanned" :key="index">
                 <td>{{ item.code }}</td>
-                <td>{{ item.format === 'NORMAL' ? 'Энгийн' : 'Шуурхай' }}</td>
                 <td>{{ item.time }}</td>
                 <td>
                   <button 
                     @click="deleteCargo(item.code)" 
                     class="btn-danger btn-small"
                   >
-                    Устгах
+                    删除
                   </button>
                 </td>
               </tr>
@@ -390,9 +388,9 @@ onUnmounted(() => {
         <p v-if="errorMessage" class="error">{{ errorMessage }}</p>
         
         <div class="buttons">
-          <button @click="resetScanner" class="btn-edit">Дахин эхлүүлэх</button>
-          <button v-if="!scannerActive" @click="startScanner" class="btn-submit">Камер асаах</button>
-          <button v-else @click="pauseScanner" class="btn-edit">Камер унтраах</button>
+          <button @click="resetScanner" class="btn-edit">重新启动</button>
+          <button v-if="!scannerActive" @click="startScanner" class="btn-submit">开启相机</button>
+          <button v-else @click="pauseScanner" class="btn-edit">关闭相机</button>
         </div>
       </div>
     </div>
@@ -410,57 +408,34 @@ onUnmounted(() => {
   padding: 60px 16px 16px;
 }
 
-// Form styles
-.form-grid {
-  background-color: #fff;
-  border-radius: 8px;
-  padding: 12px;
+// Add new zoom controls styles
+.zoom-controls {
+  display: flex;
+  gap: 8px;
   margin-bottom: 16px;
-}
 
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-
-  label {
-    font-weight: 500;
-    color: #202124;
-  }
-}
-
-.cargo-type-options {
-  display: flex;
-  gap: 8px;
-
-  input[type="radio"] {
-    display: none;
-    &:checked + .radio-box {
-      color: #fff;
-      background-color: #1a73e8;
-    }
-  }
-
-  .radio-box {
-    flex: 1;
-    display: flex;
-    justify-content: center;
-    align-items: center;
+  .zoom-btn {
+    height: 40px;
+    padding: 0 16px;
     border-radius: 8px;
+    border: none;
+    font-weight: 500;
+    font-size: 14px;
     cursor: pointer;
+    background-color: #f5f5f5;
+    color: #1a73e8;
     transition: all 0.2s;
-    height: 2.5rem;
-    background-color: #fff;
-    border: 1px solid #e0e0e0;
-    
-    .radio-label {
-      display: block;
-      text-align: center;
-      font-weight: 500;
+
+    &.active {
+      background-color: #1a73e8;
+      color: white;
+    }
+
+    &:active {
+      background-color: rgba(245, 245, 245, 0.8);
     }
   }
 }
-
 // Scanner styles
 .scanner-view {
   position: relative;

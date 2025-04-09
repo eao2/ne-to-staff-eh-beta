@@ -1,10 +1,10 @@
 <template>
   <nav class="top-nav">
     <NuxtLink to="/" class="nav-link" :class="{ active: route.path === '/' }">
-      Эрээн
+      抵达二连浩特
     </NuxtLink>
     <NuxtLink to="/in-transit" class="nav-link" :class="{ active: route.path === '/in-transit' }">
-      Замд
+      寄送至乌兰巴托
     </NuxtLink>
   </nav>
 </template>

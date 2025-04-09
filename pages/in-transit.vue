@@ -7,17 +7,33 @@ const manualBarcodeInput = ref("");
 const cargoType = ref("NORMAL");
 const scannerActive = ref(false);
 const errorMessage = ref("");
-const statusMessage = ref("Scanner initializing...");
+const statusMessage = ref("正在启动扫描仪...");
 const recentlyScanned = ref([]);
 const debugInfo = ref("");
+const zoomLevel = ref(1);
 let videoStream = null;
 let barcodeDetector = null;
 let detectionInterval = null;
 
+const setZoom = async (level) => {
+  try {
+    if (!videoStream) return;
+    const videoTrack = videoStream.getVideoTracks()[0];
+    await videoTrack.applyConstraints({
+      advanced: [{
+        zoom: level
+      }]
+    });
+    zoomLevel.value = level;
+  } catch (error) {
+    console.error("Error setting zoom:", error);
+  }
+};
+
 const startScanner = async () => {
   try {
     errorMessage.value = "";
-    statusMessage.value = "Starting camera...";
+    statusMessage.value = "正在启动扫描仪...";
     
     if (!scannerContainer.value) {
       console.error("Scanner container not found");
@@ -62,12 +78,12 @@ const startScanner = async () => {
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: 'environment',
-        width: { ideal: 1024 }, // Reduced from 4096
-        height: { ideal: 768 }, // 4:3 aspect ratio
+        width: { ideal: 2048 }, // Reduced from 4096
+        height: { ideal: 1536 }, // 4:3 aspect ratio
         aspectRatio: { ideal: 4/3 },
         frameRate: { ideal: 30, max: 30 },
         advanced: [{
-          zoom: 1.5, // Reduced zoom for better stability
+          zoom: zoomLevel.value, // Use dynamic zoom level
           brightness: { ideal: 128 },
           contrast: { ideal: 128 },
           exposureMode: 'continuous',
@@ -80,7 +96,7 @@ const startScanner = async () => {
     video.srcObject = stream;
     await video.play();
     scannerActive.value = true;
-    statusMessage.value = "Camera active. Position barcode in the center...";
+    statusMessage.value = "请将条形码对准中心位置...";
 
     // Track processed codes to avoid duplicates
     const recentlySent = new Set();
@@ -105,7 +121,7 @@ const startScanner = async () => {
 
               // Store the detected barcode
               manualBarcodeInput.value = code;
-              statusMessage.value = `Detected ${format} barcode: ${code}. Press "Замд гарсан" to send.`;
+              statusMessage.value = `检测到 ${format} 条形码: ${code}. 点击"设为在途"登记`;
 
               // Visual feedback
               document.querySelector('.scanner-view').classList.add('detected');
@@ -126,7 +142,7 @@ const startScanner = async () => {
     errorMessage.value = `Failed to start scanner: ${error.message || 'Unknown error'}`;
     debugInfo.value += `\nError: ${error.message || 'Unknown error'}`;
     scannerActive.value = false;
-    statusMessage.value = "Scanner failed to initialize";
+    statusMessage.value = "扫描仪初始化失败";
   }
 };
 
@@ -142,7 +158,7 @@ const pauseScanner = () => {
         videoStream = null;
       }
       scannerActive.value = false;
-      statusMessage.value = "Scanner paused";
+      statusMessage.value = "扫描仪已暂停";
     } catch (error) {
       console.error("Error stopping scanner:", error);
     }
@@ -161,15 +177,18 @@ const resetScanner = () => {
 const sendBarcodeToAPI = async (barcode) => {
   try {
     if (!barcode) {
-      errorMessage.value = "No barcode to send";
+      errorMessage.value = "请输入跟踪号码";
       return;
     }
     
-    statusMessage.value = `Sending barcode: ${barcode} to API...`;
+    statusMessage.value = `发送跟踪号码: ${barcode}...`;
     const response = await fetch("/api/cargo/set-in-transit", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ barcode }),
+      body: JSON.stringify({ 
+        barcode,
+        cargoType: cargoType.value 
+      }),
     });
     
     if (response.status === 409) {
@@ -315,6 +334,55 @@ onUnmounted(() => {
     <TopNavigation />
     
     <div class="content">
+      <!-- Add zoom controls -->
+      <div class="zoom-controls">
+        <button 
+          @click="setZoom(1)" 
+          :class="{ active: zoomLevel === 1 }"
+          class="zoom-btn"
+        >1x</button>
+        <button 
+          @click="setZoom(1.5)" 
+          :class="{ active: zoomLevel === 1.5 }"
+          class="zoom-btn"
+        >1.5x</button>
+        <button 
+          @click="setZoom(2)" 
+          :class="{ active: zoomLevel === 2 }"
+          class="zoom-btn"
+        >2x</button>
+      </div>
+
+      <!-- Add cargo type selection -->
+      <div class="form-grid">
+        <div class="form-group">
+          <label>货物类型:</label>
+          <div class="cargo-type-options">
+            <input 
+              type="radio" 
+              id="normal" 
+              value="NORMAL" 
+              v-model="cargoType"
+              name="cargoType"
+            />
+            <label class="radio-box" for="normal">
+              <span class="radio-label">普通 (速)</span>
+            </label>
+
+            <input 
+              type="radio" 
+              id="quick" 
+              value="QUICK" 
+              v-model="cargoType"
+              name="cargoType"
+            />
+            <label class="radio-box" for="quick">
+              <span class="radio-label">加急 (S)</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
       <div class="scanner-view" :class="{ 'active': scannerActive }">
         <div ref="scannerContainer" class="video-container">
           <!-- Video element will be inserted here -->
@@ -336,28 +404,28 @@ onUnmounted(() => {
           <input 
             type="text" 
             v-model="manualBarcodeInput" 
-            placeholder="Трак код оруулах" 
+            placeholder="请输入跟踪号码" 
             @keyup.enter="sendManualBarcode"
           />
-          <button @click="sendManualBarcode" class="btn-submit">Замд гарсан</button>
+          <button @click="sendManualBarcode" class="btn-submit">设为在途</button>
         </div>
         
         <!-- Recent scans list -->
         <div v-if="recentlyScanned.length > 0" class="recent-list">
-          <h3>Сүүлд Бүртгэсэн:</h3>
+          <h3>最近扫描:</h3>
           <table class="cargos-table">
             <thead>
               <tr>
-                <th>Трак Код</th>
-                <th>Төлөв</th>
-                <th>Цаг</th>
-                <th>Үйлдэл</th>
+                <th>跟踪号码</th>
+                <th>状态</th>
+                <th>时间</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="(item, index) in recentlyScanned" :key="index">
                 <td>{{ item.code }}</td>
-                <td>{{ item.status === 'IN_TRANSIT' ? 'Замд' : 'Буцаасан' }}</td>
+                <td>{{ item.status === 'IN_TRANSIT' ? '在途中' : '已退回' }}</td>
                 <td>{{ item.time }}</td>
                 <td>
                   <button 
@@ -365,7 +433,7 @@ onUnmounted(() => {
                     @click="revertInTransit(item.code)" 
                     class="btn-warning btn-small"
                   >
-                    Буцаах
+                    退回
                   </button>
                 </td>
               </tr>
@@ -376,9 +444,9 @@ onUnmounted(() => {
         <p v-if="errorMessage" class="error">{{ errorMessage }}</p>
         
         <div class="buttons">
-          <button @click="resetScanner" class="btn-edit">Дахин эхлүүлэх</button>
-          <button v-if="!scannerActive" @click="startScanner" class="btn-submit">Камер асаах</button>
-          <button v-else @click="pauseScanner" class="btn-edit">Камер унтраах</button>
+          <button @click="resetScanner" class="btn-edit">重新启动</button>
+          <button v-if="!scannerActive" @click="startScanner" class="btn-submit">开启相机</button>
+          <button v-else @click="pauseScanner" class="btn-edit">关闭相机</button>
         </div>
       </div>
     </div>
@@ -593,4 +661,84 @@ onUnmounted(() => {
   padding: 0 8px;
   font-size: 12px;
 }
-</style> 
+
+// Add zoom controls styles
+.zoom-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+
+  .zoom-btn {
+    height: 40px;
+    padding: 0 16px;
+    border-radius: 8px;
+    border: none;
+    font-weight: 500;
+    font-size: 14px;
+    cursor: pointer;
+    background-color: #f5f5f5;
+    color: #1a73e8;
+    transition: all 0.2s;
+
+    &.active {
+      background-color: #1a73e8;
+      color: white;
+    }
+
+    &:active {
+      background-color: rgba(245, 245, 245, 0.8);
+    }
+  }
+}
+
+// Add form styles
+.form-grid {
+  background-color: #fff;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 16px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  label {
+    font-weight: 500;
+    color: #202124;
+  }
+}
+
+.cargo-type-options {
+  display: flex;
+  gap: 8px;
+
+  input[type="radio"] {
+    display: none;
+    &:checked + .radio-box {
+      color: #fff;
+      background-color: #1a73e8;
+    }
+  }
+
+  .radio-box {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    height: 2.5rem;
+    background-color: #fff;
+    border: 1px solid #e0e0e0;
+    
+    .radio-label {
+      display: block;
+      text-align: center;
+      font-weight: 500;
+    }
+  }
+}
+</style>

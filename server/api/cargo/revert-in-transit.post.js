@@ -17,7 +17,7 @@ export default defineEventHandler(async (event) => {
     if (!cargo) {
       throw createError({
         statusCode: 404,
-        message: 'Cargo not found'
+        message: '包裹未找到'
       })
     }
 
@@ -25,11 +25,26 @@ export default defineEventHandler(async (event) => {
     if (cargo.currentStatus !== 'IN_TRANSIT') {
       throw createError({
         statusCode: 400,
-        message: 'Can only revert IN_TRANSIT status'
+        message: '只能退回在途中的包裹'
       })
     }
 
-    // Update cargo status back to RECEIVED_AT_ERENHOT
+    // Check if cargo was ever received at Erenhot
+    if (!cargo.receivedAtErenhotDate) {
+      // Delete cargo if it was never received at Erenhot
+      const deletedCargo = await prisma.cargoTracking.delete({
+        where: { trackingNumber: barcode }
+      })
+
+      return {
+        success: true,
+        message: '未在二连登记的包裹已删除',
+        cargo: deletedCargo,
+        action: 'DELETED'
+      }
+    }
+
+    // Update cargo status back to RECEIVED_AT_ERENHOT if it was previously received
     const updatedCargo = await prisma.cargoTracking.update({
       where: { trackingNumber: barcode },
       data: {
@@ -40,14 +55,15 @@ export default defineEventHandler(async (event) => {
 
     return {
       success: true,
-      message: 'Cargo status reverted to RECEIVED_AT_ERENHOT',
-      cargo: updatedCargo
+      message: '包裹状态已退回到二连',
+      cargo: updatedCargo,
+      action: 'REVERTED'
     }
   } catch (error) {
     console.error('Error reverting cargo status:', error)
     throw createError({
       statusCode: error.statusCode || 500,
-      message: error.message || 'Failed to revert cargo status'
+      message: error.message || '退回包裹失败'
     })
   }
-}) 
+})

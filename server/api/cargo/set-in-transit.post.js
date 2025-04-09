@@ -3,66 +3,66 @@ const prisma = new PrismaClient()
 
 export default defineEventHandler(async (event) => {
   try {
-    const { barcode } = await readBody(event)
+    const { barcode, cargoType } = await readBody(event)
 
     if (!barcode) {
-      throw new Error('Barcode is required')
+      throw new Error('请输入跟踪号码')
     }
 
     // Try to find existing cargo
-    const cargo = await prisma.cargoTracking.findUnique({
+    const existingCargo = await prisma.cargoTracking.findUnique({
       where: { trackingNumber: barcode }
     })
 
-    if (!cargo) {
-      throw createError({
-        statusCode: 404,
-        message: 'Cargo not found'
-      })
-    }
-
-    // Check if already in transit
-    if (cargo.currentStatus === 'IN_TRANSIT') {
-      throw createError({
-        statusCode: 409, // Conflict
-        message: 'Энэ карго замд гарсан байна'
-      })
-    }
-
-    // Only allow transition from RECEIVED_AT_ERENHOT to IN_TRANSIT
-    if (cargo.currentStatus !== 'RECEIVED_AT_ERENHOT') {
-      // If PRE_REGISTERED, give a more specific message
-      if (cargo.currentStatus === 'PRE_REGISTERED') {
-        throw createError({
-          statusCode: 400,
-          message: 'Энэ карго Эрээнд бүртгэгдээгүй байна'
+    if (existingCargo) {
+      // Check if cargo type is different and an update is needed
+      if (cargoType && existingCargo.cargoType !== cargoType) {
+        const updatedCargo = await prisma.cargoTracking.update({
+          where: { trackingNumber: barcode },
+          data: {
+            cargoType: cargoType // Only update the cargo type
+          }
         })
+
+        return {
+          success: true,
+          message: `包裹类型已更改为${cargoType === 'QUICK' ? '加急' : '普通'}`,
+          cargo: updatedCargo,
+          typeUpdated: true
+        }
       }
-      throw createError({
-        statusCode: 400,
-        message: 'Can only set IN_TRANSIT status for cargo that is RECEIVED_AT_ERENHOT'
-      })
+
+      // If cargo type is the same, just return success
+      return {
+        success: true,
+        message: '包裹类型未变更',
+        cargo: existingCargo,
+        typeUpdated: false
+      }
     }
 
-    // Update cargo status to IN_TRANSIT
-    const updatedCargo = await prisma.cargoTracking.update({
-      where: { trackingNumber: barcode },
+    // Create new cargo if doesn't exist
+    const newCargo = await prisma.cargoTracking.create({
       data: {
+        trackingNumber: barcode,
         currentStatus: 'IN_TRANSIT',
+        cargoType: cargoType || 'NORMAL',
         inTransitDate: new Date().toISOString()
       }
     })
 
     return {
       success: true,
-      message: 'Cargo status updated to IN_TRANSIT',
-      cargo: updatedCargo
+      message: '新包裹已创建并设为在途状态',
+      cargo: newCargo,
+      isNew: true
     }
+
   } catch (error) {
     console.error('Error updating cargo status:', error)
     throw createError({
       statusCode: error.statusCode || 500,
-      message: error.message || 'Failed to update cargo status'
+      message: error.message || '更新包裹状态失败'
     })
   }
-}) 
+})
